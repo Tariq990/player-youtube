@@ -1,0 +1,48 @@
+
+{
+  "CHANNEL_URL": "https://www.youtube.com/@inkecho_iv",
+  "MAX_WINDOWS": 4,
+  "UPDATE_INTERVAL": 300,
+  "ERROR_RETRY_DELAY": 30,
+  "MAX_RETRIES": 3,
+  "COOKIE_DB_PATH": "data/cookies.json",
+  "SEEN_DB_PATH": "data/seen_videos.sqlite",
+  "LOG_PATH": "logs/app.log",
+  "DEFAULT_VIDEO_DURATION": 300,
+  "MIN_VIDEO_DURATION": 30,
+  "SKIP_SHORTS": true,
+  "SKIP_LIVE": true,
+  "COOKIE_ROTATION_POLICY": "round_robin",
+  "MAX_SESSIONS_PER_ACCOUNT": 2,
+  "RESOURCE_MONITOR_INTERVAL": 60,
+  "USE_HEADLESS": false,
+  "ENABLE_HUMAN_SIMULATION": true,
+  
+  "RATE_LIMITING": {
+    "MAX_VIDEOS_PER_ACCOUNT_PER_DAY": 100,
+    "MIN_DELAY_BETWEEN_VIDEOS": 30,
+    "MAX_CONCURRENT_SESSIONS_PER_IP": 2,
+    "COOLDOWN_AFTER_403": 3600,
+    "COOLDOWN_AFTER_CAPTCHA": 7200
+  },
+  
+  "ANTI_DETECTION": {
+    "ENABLE_USER_AGENT_ROTATION": false,
+    "ENABLE_VIEWPORT_RANDOMIZATION": true,
+    "ENABLE_MOUSE_SIMULATION": true,
+    "ENABLE_SCROLL_SIMULATION": true,
+    "RANDOM_DELAY_MIN": 2,
+    "RANDOM_DELAY_MAX": 5,
+    "MOUSE_MOVE_COUNT_MIN": 3,
+    "MOUSE_MOVE_COUNT_MAX": 8,
+    "SCROLL_COUNT_MIN": 1,
+    "SCROLL_COUNT_MAX": 3
+  },
+  
+  "HEALTH_CHECK": {
+    "ENABLED": false,
+    "PORT": 8080,
+    "ENDPOINT": "/health",
+    "CHECK_INTERVAL": 60
+  }
+}
