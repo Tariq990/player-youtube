@@ -71,6 +71,21 @@ class VideoPlaybackError(VideoError):
     pass
 
 
+class VideoFetchError(VideoError):
+    """Raised when fetching videos fails."""
+    pass
+
+
+class PlayerError(YouTubePlayerError):
+    """Base exception for player-related errors."""
+    pass
+
+
+class ConfigError(YouTubePlayerError):
+    """Raised when configuration is invalid."""
+    pass
+
+
 class RateLimitError(YouTubePlayerError):
     """Raised when rate limit is exceeded."""
     
