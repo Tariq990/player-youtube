@@ -31,6 +31,9 @@ cd ~
 git clone https://github.com/Tariq990/player-youtube.git
 cd player-youtube
 
+# 6.1 التأكد من آخر تحديث (إذا كان المجلد موجود مسبقاً)
+git pull origin main
+
 # 7. إنشاء البيئة الافتراضية
 python3.13 -m venv venv
 source venv/bin/activate
