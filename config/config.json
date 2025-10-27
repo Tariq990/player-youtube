@@ -3,7 +3,7 @@
   "CHANNEL_URL": "https://www.youtube.com/@inkecho_iv",
   "MAX_WINDOWS": 4,
   "UPDATE_INTERVAL": 300,
-  "NEW_VIDEO_CHECK_INTERVAL": 300,
+  "NEW_VIDEO_CHECK_INTERVAL": 600,
   "ERROR_RETRY_DELAY": 30,
   "MAX_RETRIES": 3,
   "COOKIE_DB_PATH": "data/cookies.json",

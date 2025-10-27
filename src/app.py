@@ -574,7 +574,7 @@ async def main():
     async def monitor_new_videos():
         """Monitor channel for new videos and add them to queue with priority"""
         last_check = datetime.now()
-        check_interval = config.get('NEW_VIDEO_CHECK_INTERVAL', 300)  # 5 minutes default
+        check_interval = config.get('NEW_VIDEO_CHECK_INTERVAL', 600)  # 10 minutes default
         
         while not shutdown_event.is_set():
             try:
@@ -622,21 +622,22 @@ async def main():
         
         while not shutdown_event.is_set():
             try:
-                await asyncio.sleep(10)  # Check every 10 seconds
+                await asyncio.sleep(30)  # Check every 30 seconds
                 
                 if shutdown_event.is_set():
                     break
                 
                 # Check if queue is empty
                 if video_queue.empty():
-                    # Check if there are new videos first
-                    current_videos = await fetch_channel_videos(channel_url, config.data, max_videos=100)
-                    new_videos = persistence.get_unseen_videos(current_videos) if current_videos else []
+                    # Wait a bit to make sure queue is really empty (workers might be processing)
+                    await asyncio.sleep(10)
                     
-                    if new_videos:
-                        # New videos found, they will be added by monitor_new_videos
-                        print(f"\n🆕 New videos detected, skipping replay...")
+                    # Double-check queue is still empty
+                    if not video_queue.empty():
                         continue
+                    
+                    # Check if there are new videos first (don't fetch, just check database)
+                    # New videos will be added by monitor_new_videos background task
                     
                     # No new videos, start replay
                     replay_count += 1
@@ -658,8 +659,8 @@ async def main():
                     else:
                         print(f"⚠️ No videos found for replay")
                     
-                    # Wait a bit before next check
-                    await asyncio.sleep(30)
+                    # Wait longer before next check
+                    await asyncio.sleep(60)
                 
             except asyncio.CancelledError:
                 break
