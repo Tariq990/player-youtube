@@ -6,10 +6,13 @@
 # الانتقال للمشروع
 cd ~/player-youtube
 
+# سحب آخر التحديثات (اختياري)
+git pull origin main
+
 # تفعيل البيئة الافتراضية
 source venv/bin/activate
 
-# تشغيل التطبيق (headless mode)
+# تشغيل التطبيق (headless mode مع 10 متصفحات)
 xvfb-run -a python3.13 src/app.py
 
 # ========================================
