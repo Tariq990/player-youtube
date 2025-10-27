@@ -1,0 +1,63 @@
+# ========================================
+# إعداد Systemd Service للتشغيل 24/7
+# انسخ والصق في نافذة SSH على السيرفر
+# ========================================
+
+# إنشاء ملف الخدمة
+sudo nano /etc/systemd/system/youtube-player.service
+
+# ========================================
+# الصق هذا المحتوى في الملف:
+# ========================================
+
+[Unit]
+Description=YouTube Player Auto-View Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/player-youtube
+Environment="DISPLAY=:99"
+ExecStartPre=/usr/bin/Xvfb :99 -screen 0 1920x1080x24 &
+ExecStart=/home/ubuntu/player-youtube/venv/bin/python3.13 /home/ubuntu/player-youtube/src/app.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+
+# ========================================
+# احفظ الملف:
+# اضغط: Ctrl+O ثم Enter
+# اخرج: Ctrl+X
+# ========================================
+
+# تفعيل الخدمة
+sudo systemctl daemon-reload
+sudo systemctl enable youtube-player
+sudo systemctl start youtube-player
+
+# التحقق من الحالة
+sudo systemctl status youtube-player
+
+# مشاهدة السجلات المباشرة
+sudo journalctl -u youtube-player -f
+
+# ========================================
+# أوامر إدارة الخدمة:
+# ========================================
+
+# إيقاف الخدمة
+# sudo systemctl stop youtube-player
+
+# إعادة التشغيل
+# sudo systemctl restart youtube-player
+
+# مشاهدة آخر 100 سطر من السجلات
+# sudo journalctl -u youtube-player -n 100
+
+# إلغاء التشغيل التلقائي
+# sudo systemctl disable youtube-player

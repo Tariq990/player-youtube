@@ -1,0 +1,47 @@
+# ========================================
+# أوامر الإعداد على السيرفر
+# انسخ كل الأوامر والصقها في نافذة SSH
+# ========================================
+
+# 1. تحديث النظام
+sudo apt update && sudo apt upgrade -y
+
+# 2. إضافة مستودع Python
+sudo add-apt-repository ppa:deadsnakes/ppa -y
+sudo apt update
+
+# 3. تثبيت Python 3.13
+sudo apt install -y python3.13 python3.13-venv python3-pip
+
+# 4. تثبيت Brave Browser - الخطوة الأولى
+sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+
+# 4. تثبيت Brave Browser - الخطوة الثانية
+echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" | sudo tee /etc/apt/sources.list.d/brave-browser-release.list
+
+# 4. تثبيت Brave Browser - الخطوة الثالثة
+sudo apt update
+sudo apt install -y brave-browser
+
+# 5. تثبيت Xvfb والمكتبات المطلوبة
+sudo apt install -y xvfb fonts-liberation libnss3 libxss1 libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2
+
+# 6. استنساخ المشروع من GitHub
+cd ~
+git clone https://github.com/Tariq990/player-youtube.git
+cd player-youtube
+
+# 7. إنشاء البيئة الافتراضية
+python3.13 -m venv venv
+source venv/bin/activate
+
+# 8. تثبيت المتطلبات
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# ========================================
+# ✅ انتهى الإعداد!
+# ========================================
+# الآن شغّل: 2_upload_cookies.bat
+# من جهازك (Windows)
+# ========================================

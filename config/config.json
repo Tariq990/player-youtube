@@ -1,7 +1,7 @@
 
 {
   "CHANNEL_URL": "https://www.youtube.com/@inkecho_iv",
-  "MAX_WINDOWS": 4,
+  "MAX_WINDOWS": 10,
   "UPDATE_INTERVAL": 300,
   "NEW_VIDEO_CHECK_INTERVAL": 600,
   "ERROR_RETRY_DELAY": 30,
@@ -18,7 +18,7 @@
   "COOKIE_ROTATION_POLICY": "round_robin",
   "MAX_SESSIONS_PER_ACCOUNT": 2,
   "RESOURCE_MONITOR_INTERVAL": 60,
-  "USE_HEADLESS": false,
+  "USE_HEADLESS": true,
   "ENABLE_HUMAN_SIMULATION": true,
   
   "RATE_LIMITING": {
