@@ -25,11 +25,28 @@ def get_brave_path() -> Optional[str]:
     if env_path and os.path.exists(env_path):
         return env_path
     
-    brave_paths = [
-        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-        r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-        os.path.expanduser(r"~\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe"),
-    ]
+    # Platform-specific paths
+    import platform
+    system = platform.system()
+    
+    if system == "Linux":
+        brave_paths = [
+            "/usr/bin/brave-browser",
+            "/usr/bin/brave",
+            "/snap/bin/brave",
+            "/usr/local/bin/brave-browser",
+            "/usr/local/bin/brave",
+        ]
+    elif system == "Darwin":  # macOS
+        brave_paths = [
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+        ]
+    else:  # Windows
+        brave_paths = [
+            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+            r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+            os.path.expanduser(r"~\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe"),
+        ]
     
     for path in brave_paths:
         if os.path.exists(path):
