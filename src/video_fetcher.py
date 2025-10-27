@@ -4,13 +4,20 @@ Uses yt-dlp to extract video metadata.
 """
 
 # Standard library imports
+import asyncio
 import json
 import logging
 import subprocess
 from typing import Dict, List
 
+# Local imports
+from rate_limiter import TokenBucketRateLimiter
+
 # Get logger
 logger = logging.getLogger(__name__)
+
+# Global rate limiter: 1 request per 2 seconds (30 req/min)
+_yt_dlp_rate_limiter = TokenBucketRateLimiter(rate=30, period=60.0)
 
 
 class VideoFetcher:
@@ -19,7 +26,7 @@ class VideoFetcher:
     def __init__(self, channel_url: str):
         self.channel_url = channel_url
     
-    def fetch_videos(self, max_videos: int = 50) -> List[Dict]:
+    async def fetch_videos(self, max_videos: int = 50) -> List[Dict]:
         """
         Fetch videos from channel
         Returns list of video objects
@@ -41,12 +48,19 @@ class VideoFetcher:
                 video_url
             ]
             
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=120
-            )
+            # Apply rate limiting before making the call
+            async with _yt_dlp_rate_limiter:
+                # Run subprocess in executor to avoid blocking
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=120
+                    )
+                )
             
             if result.returncode != 0:
                 logger.error(f"yt-dlp error: {result.stderr}")
@@ -136,10 +150,10 @@ class VideoFetcher:
         return filtered
 
 
-def fetch_channel_videos(channel_url: str, config: Dict, max_videos: int = 50) -> List[Dict]:
+async def fetch_channel_videos(channel_url: str, config: Dict, max_videos: int = 50) -> List[Dict]:
     """
     Convenience function to fetch and filter videos
     """
     fetcher = VideoFetcher(channel_url)
-    videos = fetcher.fetch_videos(max_videos)
+    videos = await fetcher.fetch_videos(max_videos)
     return fetcher.filter_videos(videos, config)

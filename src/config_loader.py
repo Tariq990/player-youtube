@@ -92,16 +92,17 @@ class Config:
             >>> config.get('RATE_LIMITING.MAX_VIDEOS_PER_DAY')
             100
         """
-        keys = key.split('.')
-        value = self.data
-        
-        for k in keys:
-            if isinstance(value, dict):
-                value = value.get(k, default)
-            else:
-                return default
-                
-        return value
+        try:
+            keys = key.split('.')
+            value = self.data
+            for k in keys:
+                if isinstance(value, dict):
+                    value = value[k]
+                else:
+                    return default
+            return value
+        except (KeyError, TypeError):
+            return default
     
     def __getitem__(self, key: str) -> Any:
         """Allow dict-like access"""

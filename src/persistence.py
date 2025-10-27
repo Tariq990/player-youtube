@@ -29,10 +29,20 @@ class Persistence:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS seen_videos (
                 video_id TEXT PRIMARY KEY,
-                last_seen TIMESTAMP,
+                last_seen TEXT,
                 times_seen INTEGER DEFAULT 1,
                 title TEXT,
                 duration INTEGER
+            )
+        ''')
+        
+        # Table for videos currently being processed (for resume functionality)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS in_progress (
+                video_id TEXT PRIMARY KEY,
+                title TEXT,
+                started_at TEXT,
+                cookie_id TEXT
             )
         ''')
         
@@ -66,13 +76,13 @@ class Persistence:
                 UPDATE seen_videos 
                 SET last_seen = ?, times_seen = ?
                 WHERE video_id = ?
-            ''', (datetime.now(), times_seen, video_id))
+            ''', (datetime.now().isoformat(timespec='seconds'), times_seen, video_id))
         else:
             # Insert new
             cursor.execute('''
                 INSERT INTO seen_videos (video_id, last_seen, times_seen, title, duration)
                 VALUES (?, ?, 1, ?, ?)
-            ''', (video_id, datetime.now(), title, duration))
+            ''', (video_id, datetime.now().isoformat(timespec='seconds'), title, duration))
         
         conn.commit()
         conn.close()
@@ -108,4 +118,68 @@ class Persistence:
         conn.commit()
         conn.close()
         
-        print("🗑️  Cleared all seen videos")
+        print("🗑️ All seen videos cleared")
+    
+    def mark_in_progress(self, video_id: str, title: str = "", cookie_id: str = ""):
+        """Mark video as currently being processed"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT OR REPLACE INTO in_progress (video_id, title, started_at, cookie_id)
+            VALUES (?, ?, ?, ?)
+        ''', (video_id, title, datetime.now().isoformat(), cookie_id))
+        
+        conn.commit()
+        conn.close()
+    
+    def remove_from_progress(self, video_id: str):
+        """Remove video from in-progress (after completion or failure)"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM in_progress WHERE video_id = ?', (video_id,))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_interrupted_videos(self) -> List[dict]:
+        """Get videos that were interrupted (started but not completed)"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Get videos that were started more than 1 hour ago but not marked as seen
+        cursor.execute('''
+            SELECT video_id, title, started_at, cookie_id
+            FROM in_progress
+            WHERE datetime(started_at) < datetime('now', '-1 hour')
+        ''')
+        
+        interrupted = []
+        for row in cursor.fetchall():
+            interrupted.append({
+                'video_id': row[0],
+                'title': row[1],
+                'started_at': row[2],
+                'cookie_id': row[3]
+            })
+        
+        conn.close()
+        return interrupted
+    
+    def clear_old_progress(self):
+        """Clear old in-progress entries (cleanup)"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            DELETE FROM in_progress
+            WHERE datetime(started_at) < datetime('now', '-24 hours')
+        ''')
+        
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        if deleted > 0:
+            print(f"🧹 Cleaned {deleted} old in-progress entries")

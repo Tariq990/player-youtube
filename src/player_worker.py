@@ -88,22 +88,79 @@ class PlayerWorker:
             return any(c['name'] in ['LOGIN_INFO', '__Secure-3PSID'] for c in cookies)
     
     async def _get_video_duration(self, video: Dict) -> Optional[int]:
-        """Get video duration in seconds"""
+        """
+        Get video duration in seconds with retry logic.
+        Tries multiple methods with exponential backoff.
+        """
         # First check if we have it in video dict
-        if 'duration' in video:
-            return int(video['duration'])
+        if 'duration' in video and video['duration']:
+            try:
+                return int(video['duration'])
+            except (ValueError, TypeError):
+                pass
         
-        # Try to get from video element
-        try:
-            await asyncio.sleep(2)
-            duration = self.driver.execute_script(
-                "return document.querySelector('video').duration"
-            )
-            if duration and duration > 0:
-                return int(duration)
-        except:
-            pass
+        # Try to get from video element with retries
+        max_retries = 5
+        base_delay = 1.0
         
+        for attempt in range(max_retries):
+            try:
+                # Wait for video element to load
+                wait_time = base_delay * (2 ** attempt)  # Exponential backoff
+                await asyncio.sleep(wait_time)
+                
+                # Method 1: Get from video element
+                duration = self.driver.execute_script(
+                    "return document.querySelector('video').duration"
+                )
+                
+                if duration and not (duration == float('inf') or duration <= 0):
+                    print(f"✅ Duration detected: {int(duration)}s (attempt {attempt + 1})")
+                    return int(duration)
+                
+                # Method 2: Try from ytInitialPlayerResponse
+                duration = self.driver.execute_script("""
+                    try {
+                        return ytInitialPlayerResponse.videoDetails.lengthSeconds;
+                    } catch (e) {
+                        return null;
+                    }
+                """)
+                
+                if duration and duration > 0:
+                    print(f"✅ Duration from API: {int(duration)}s (attempt {attempt + 1})")
+                    return int(duration)
+                
+                # Method 3: Parse from time display
+                duration = self.driver.execute_script("""
+                    try {
+                        const timeDisplay = document.querySelector('.ytp-time-duration');
+                        if (!timeDisplay) return null;
+                        
+                        const timeStr = timeDisplay.textContent;
+                        const parts = timeStr.split(':').map(p => parseInt(p));
+                        
+                        if (parts.length === 2) {  // MM:SS
+                            return parts[0] * 60 + parts[1];
+                        } else if (parts.length === 3) {  // HH:MM:SS
+                            return parts[0] * 3600 + parts[1] * 60 + parts[2];
+                        }
+                        return null;
+                    } catch (e) {
+                        return null;
+                    }
+                """)
+                
+                if duration and duration > 0:
+                    print(f"✅ Duration from display: {int(duration)}s (attempt {attempt + 1})")
+                    return int(duration)
+                
+                print(f"⚠️  Duration not ready (attempt {attempt + 1}/{max_retries})")
+                
+            except Exception as e:
+                print(f"⚠️  Error getting duration (attempt {attempt + 1}/{max_retries}): {e}")
+        
+        print("❌ Could not detect duration after all retries")
         return None
     
     async def _simulate_human_behavior_before_play(self):
@@ -180,15 +237,26 @@ class PlayerWorker:
     
     async def _monitor_playback(self, duration: int) -> bool:
         """
-        Monitor video playback for the full duration
+        Monitor video playback for the FULL duration (100%)
         This is CRITICAL for view counting
+        
+        Watches complete video from start to finish
         """
         min_duration = self.config.get('MIN_VIDEO_DURATION', 30)
         
-        # Ensure we watch at least minimum duration
-        watch_time = max(min_duration, min(duration, duration))
+        # Watch percentage from config (default 100% = 1.0)
+        watch_percentage = self.config.get('WATCH_PERCENTAGE', 1.0)
         
-        print(f"👁️  Monitoring playback for {watch_time} seconds...")
+        # Calculate watch time
+        calculated_watch_time = int(duration * watch_percentage)
+        
+        # Ensure we watch at least min_duration
+        watch_time = max(min_duration, calculated_watch_time)
+        
+        # Cap at actual video duration
+        watch_time = min(watch_time, duration)
+        
+        print(f"👁️  Monitoring playback for {watch_time}s ({int(watch_time/duration*100)}% of {duration}s video)")
         
         start_time = time.time()
         check_interval = 5  # Check every 5 seconds

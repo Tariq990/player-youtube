@@ -1,0 +1,14 @@
+[run]
+branch = True
+source = src
+
+[report]
+omit =
+    src/app.py
+    src/player_worker.py
+    src/cookie_manager.py
+    src/constants.py
+    src/__init__.py
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.: 

@@ -1,0 +1,21 @@
+{
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "tests/**"
+  ],
+  "extraPaths": [
+    "src"
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": false,
+  "reportOptionalSubscript": false,
+  "reportArgumentType": false,
+  "reportGeneralTypeIssues": false,
+  "pythonVersion": "3.10",
+  "pythonPlatform": "Windows"
+}

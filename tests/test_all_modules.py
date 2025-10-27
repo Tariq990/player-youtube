@@ -26,7 +26,7 @@ test_results = {
 }
 
 try:
-    from app import get_brave_path, create_driver, test_cookie_login
+    from app import get_brave_path, create_driver
     print("✅ app.py imports successful")
     test_results['passed'] += 1
 except Exception as e:

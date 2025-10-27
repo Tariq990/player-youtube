@@ -27,73 +27,17 @@ from cookie_manager import CookieManager
 from persistence import Persistence
 from player_worker import PlayerWorker
 from video_fetcher import fetch_channel_videos
+from browser_manager import get_brave_path, create_driver, add_cookies_to_driver
+from retry_logic import retry_async, RetryConfig, ErrorType
+from session_metrics import SessionMetrics
+from cookie_watcher import CookieWatcher
+from smart_cookie_rotator import SmartCookieRotator
+from retry_logic import retry_async, RetryConfig, ErrorType
 
 # Add current dir to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 load_dotenv()
-
-
-def get_brave_path():
-    """Get Brave browser executable path"""
-    env_path = os.getenv('BRAVE_BINARY_PATH')
-    if env_path and os.path.exists(env_path):
-        return env_path
-    
-    brave_paths = [
-        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-        r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-        os.path.expanduser(r"~\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe"),
-    ]
-    
-    for path in brave_paths:
-        if os.path.exists(path):
-            return path
-    return None
-
-
-def create_driver(brave_path: str, user_agent: Optional[str] = None, headless: bool = False):
-    """Create a Brave browser driver"""
-    chrome_options = Options()
-    chrome_options.binary_location = brave_path
-    
-    # Headless or visible
-    if headless:
-        chrome_options.add_argument('--headless=new')
-    else:
-        chrome_options.add_argument('--start-maximized')
-    
-    # Basic options
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--disable-gpu')
-    
-    # Set user agent if provided
-    if user_agent:
-        chrome_options.add_argument(f'user-agent={user_agent}')
-    
-    # Anti-detection (CRITICAL for view counting)
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-    chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-    
-    # Create driver - try system ChromeDriver first, then webdriver-manager
-    try:
-        # Try system ChromeDriver
-        driver = webdriver.Chrome(options=chrome_options)
-    except Exception as e:
-        # Fallback to webdriver-manager
-        try:
-            service = Service(ChromeDriverManager(chrome_type=ChromeType.BRAVE).install())
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-        except:
-            # Last resort - just use default
-            driver = webdriver.Chrome(options=chrome_options)
-    
-    # Hide webdriver property
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-    
-    return driver
 
 
 def test_cookie_login(cookie_data: dict, brave_path: str) -> bool:
@@ -111,26 +55,8 @@ def test_cookie_login(cookie_data: dict, brave_path: str) -> bool:
         # Navigate to YouTube
         driver.get("https://www.youtube.com")
         
-        # Add cookies
-        cookies = cookie_data.get('cookies', [])
-        for cookie in cookies:
-            try:
-                cookie_dict = {
-                    'name': cookie['name'],
-                    'value': cookie['value'],
-                    'domain': cookie.get('domain', '.youtube.com'),
-                    'path': cookie.get('path', '/'),
-                    'secure': cookie.get('secure', False),
-                }
-                
-                if 'expiry' in cookie:
-                    cookie_dict['expiry'] = int(cookie['expiry'])
-                elif 'expirationDate' in cookie:
-                    cookie_dict['expiry'] = int(cookie['expirationDate'])
-                
-                driver.add_cookie(cookie_dict)
-            except:
-                pass
+        # Add cookies using helper
+        add_cookies_to_driver(driver, cookie_data.get('cookies', []))
         
         # Reload to apply cookies
         driver.get("https://www.youtube.com")
@@ -237,55 +163,66 @@ async def play_video_task_with_retry(video: dict, cookie_data: dict, config: dic
                                       persistence: Persistence, cookie_mgr: CookieManager, 
                                       all_valid_cookies: List[Dict], brave_path: str):
     """
-    Play video with retry logic and cookie fallback
+    Play video with sophisticated retry logic and exponential backoff
     """
-    max_retries = 2
-    retry_delay = 30  # seconds
+    retry_config = RetryConfig(
+        max_retries=3,
+        base_delay=2.0,  # Start with 2 seconds
+        max_delay=60.0,  # Cap at 60 seconds
+        jitter=True
+    )
     
     current_cookie = cookie_data
     
-    for attempt in range(max_retries + 1):
+    async def attempt_play():
+        """Single play attempt - can raise exceptions for retry classification"""
         result = await play_video_task(video, current_cookie, config, semaphore, persistence, cookie_mgr)
         
-        if result:
-            return True  # Success!
+        if not result:
+            # Classify the error to determine retry strategy
+            # For now, treat all failures as transient unless we have better classification
+            raise Exception("Video playback failed")
         
-        # Failed - determine if we should retry
-        if attempt < max_retries:
-            print(f"⏳ Retry {attempt + 1}/{max_retries} in {retry_delay} seconds...")
-            await asyncio.sleep(retry_delay)
-        else:
-            # All retries failed - try fallback cookie
-            print(f"❌ All retries failed for cookie: {current_cookie.get('account_name')}")
-            
-            # Try next cookie
-            current_index = None
-            for idx, cookie in enumerate(all_valid_cookies):
-                if cookie.get('id') == current_cookie.get('id'):
-                    current_index = idx
-                    break
-            
-            if current_index is not None and len(all_valid_cookies) > 1:
-                next_index = (current_index + 1) % len(all_valid_cookies)
-                next_cookie = all_valid_cookies[next_index]
-                
-                print(f"🔄 Switching to fallback cookie: {next_cookie.get('account_name')}")
-                
-                # Re-test the new cookie before using
-                print("   🔍 Testing fallback cookie...")
-                if test_cookie_login(next_cookie, brave_path):
-                    print("   ✅ Fallback cookie valid - retrying video...")
-                    current_cookie = next_cookie
-                    # One more try with new cookie
-                    result = await play_video_task(video, current_cookie, config, semaphore, persistence, cookie_mgr)
-                    return result
-                else:
-                    print("   ❌ Fallback cookie also invalid!")
-                    return False
-            else:
-                return False
+        return result
     
-    return False
+    try:
+        # Use the new retry logic with exponential backoff
+        result = await retry_async(
+            attempt_play,
+            retry_config,
+            operation_name=f"play_video_{video.get('video_id', 'unknown')}"
+        )
+        return result
+    except Exception as e:
+        # All retries exhausted - try fallback cookie
+        print(f"❌ All retries failed for cookie: {current_cookie.get('account_name')}")
+        
+        # Try next cookie
+        current_index = None
+        for idx, cookie in enumerate(all_valid_cookies):
+            if cookie.get('id') == current_cookie.get('id'):
+                current_index = idx
+                break
+        
+        if current_index is not None and len(all_valid_cookies) > 1:
+            next_index = (current_index + 1) % len(all_valid_cookies)
+            next_cookie = all_valid_cookies[next_index]
+            
+            print(f"🔄 Switching to fallback cookie: {next_cookie.get('account_name')}")
+            
+            # Re-test the new cookie before using
+            print("   🔍 Testing fallback cookie...")
+            if test_cookie_login(next_cookie, brave_path):
+                print("   ✅ Fallback cookie valid - retrying video...")
+                current_cookie = next_cookie
+                # One more try with new cookie
+                result = await play_video_task(video, current_cookie, config, semaphore, persistence, cookie_mgr)
+                return result
+            else:
+                print("   ❌ Fallback cookie also invalid!")
+                return False
+        else:
+            return False
 
 
 async def play_video_task(video: dict, cookie_data: dict, config: dict, semaphore: asyncio.Semaphore, 
@@ -319,28 +256,10 @@ async def play_video_task(video: dict, cookie_data: dict, config: dict, semaphor
             print("📺 Opening YouTube...")
             driver.get("https://www.youtube.com")
             
-            # Add cookies
+            # Add cookies using helper
             cookies = cookie_data.get('cookies', [])
             print(f"🍪 Adding {len(cookies)} cookies...")
-            
-            for cookie in cookies:
-                try:
-                    cookie_dict = {
-                        'name': cookie['name'],
-                        'value': cookie['value'],
-                        'domain': cookie.get('domain', '.youtube.com'),
-                        'path': cookie.get('path', '/'),
-                        'secure': cookie.get('secure', False),
-                    }
-                    
-                    if 'expiry' in cookie:
-                        cookie_dict['expiry'] = int(cookie['expiry'])
-                    elif 'expirationDate' in cookie:
-                        cookie_dict['expiry'] = int(cookie['expirationDate'])
-                    
-                    driver.add_cookie(cookie_dict)
-                except:
-                    pass
+            add_cookies_to_driver(driver, cookies)
             
             # Reload to apply cookies
             driver.get("https://www.youtube.com")
@@ -395,6 +314,12 @@ async def main():
     print("=" * 60)
     print()
     
+    # Race condition protection lock
+    valid_cookies_lock = asyncio.Lock()
+    
+    # Initialize session metrics
+    metrics = SessionMetrics()
+    
     # Load config
     print("📋 Loading configuration...")
     try:
@@ -416,15 +341,25 @@ async def main():
     # Setup persistence
     print("\n💾 Setting up database...")
     persistence = Persistence(config['SEEN_DB_PATH'])
+    
+    # Cleanup old progress entries
+    persistence.clear_old_progress()
+    
     seen_count = persistence.get_seen_count()
     print(f"✅ Database ready ({seen_count} videos already seen)")
+    
+    # Check for interrupted videos
+    interrupted = persistence.get_interrupted_videos()
+    if interrupted:
+        print(f"\n📌 Found {len(interrupted)} interrupted videos from previous session")
+        print("   These will be retried...")
     
     # Fetch videos
     channel_url = config['CHANNEL_URL']
     print(f"\n🔍 Fetching videos from channel...")
     print(f"   URL: {channel_url}")
     
-    all_videos = fetch_channel_videos(channel_url, config.data, max_videos=100)
+    all_videos = await fetch_channel_videos(channel_url, config.data, max_videos=100)
     
     if not all_videos:
         print("❌ No videos found!")
@@ -455,10 +390,27 @@ async def main():
     
     print(f"✅ Loaded {len(active_cookies)} cookie sets")
     
+    # Setup cookie file watcher
+    cookie_path = Path(config['COOKIE_DB_PATH'])
+    
+    def reload_cookies():
+        """Callback for cookie file changes."""
+        try:
+            cookie_mgr.load()
+            new_active = cookie_mgr.get_active_cookies()
+            print(f"\n🔄 Cookies reloaded: {len(new_active)} active sets")
+        except Exception as e:
+            print(f"\n❌ Failed to reload cookies: {e}")
+    
+    watcher = CookieWatcher(cookie_path, reload_cookies, debounce_seconds=2.0)
+    watcher.start()
+    print(f"👁️  Watching {cookie_path.name} for changes...")
+    
     # Test all cookies and filter out invalid ones
     valid_cookies = test_and_filter_cookies(active_cookies, brave_path)
     
     if not valid_cookies:
+        watcher.stop()  # Stop watcher before exiting
         print("\n❌ No valid (logged-in) cookies found!")
         print("   All cookies failed login test")
         print("   Please save new cookies: python scripts/save_cookies.py")
@@ -471,82 +423,301 @@ async def main():
     
     cookie_mgr.persist()  # Save state
     
+    # Initialize Smart Cookie Rotator
+    cookie_rotator = SmartCookieRotator(
+        valid_cookies,
+        min_health_score=30.0,
+        max_consecutive_failures=5
+    )
+    print(f"🧠 Smart Cookie Rotation enabled")
+    
     # Track file modification time for auto-reload
     cookie_file_mtime = os.path.getmtime(config['COOKIE_DB_PATH'])
     
-    # Start playing videos
+    # Smart worker allocation based on video count
     max_windows = config.get('MAX_WINDOWS', 4)
-    print(f"\n🚀 Starting playback with {max_windows} concurrent windows...")
+    video_count = len(unseen_videos)
+    
+    # Calculate optimal worker count
+    if video_count == 1:
+        # 1 video: Use all 4 workers (same video on 4 browsers for redundancy)
+        active_workers = max_windows
+        duplicate_videos = True
+        print(f"\n🎯 Single video mode: Using {active_workers} workers for redundancy")
+    elif video_count == 2:
+        # 2 videos: Use 2 workers (1 per video)
+        active_workers = 2
+        duplicate_videos = False
+        print(f"\n🎯 Dual video mode: Using {active_workers} workers (1 per video)")
+    elif video_count <= max_windows:
+        # Few videos: 1 worker per video
+        active_workers = video_count
+        duplicate_videos = False
+        print(f"\n🎯 Balanced mode: Using {active_workers} workers (1 per video)")
+    else:
+        # Many videos: Use all available workers
+        active_workers = max_windows
+        duplicate_videos = False
+        print(f"\n🎯 Full concurrency mode: Using {active_workers} workers")
+    
+    print(f"\n🚀 Starting playback...")
     print(f"⏱️  Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📹 Videos to play: {len(unseen_videos)}")
     
     # Distribute cookies evenly across videos
     num_cookies = len(valid_cookies)
     print(f"🍪 Available cookies: {num_cookies}")
-    print(f"📊 Distribution strategy: Rotating cookies evenly")
-    print(f"🔄 Auto-reload: Every 10 videos or on file change")
+    print(f"📊 Distribution strategy: Smart rotation (health-based)")
+    print(f"🔄 Auto-reload: Continuous monitoring for new videos")
     print("=" * 60)
     
-    semaphore = asyncio.Semaphore(max_windows)
-    tasks = []
+    # Queue-based processing for better resource management
+    video_queue = asyncio.Queue()
     
-    # Create all tasks at once - semaphore will control concurrency
-    # Distribute cookies evenly: video[0]->cookie[0], video[1]->cookie[1], video[2]->cookie[0]...
-    for idx, video in enumerate(unseen_videos, 1):
-        # Check if we need to reload cookies (every 10 videos or file changed)
-        if idx % 10 == 0 or os.path.getmtime(config['COOKIE_DB_PATH']) > cookie_file_mtime:
-            print(f"\n🔄 [{idx}/{len(unseen_videos)}] Reloading cookies...")
-            cookie_mgr.load()
-            new_cookies = cookie_mgr.get_active_cookies()
-            
-            # Test only NEW cookies (not already in valid_cookies)
-            existing_ids = {c.get('id') for c in valid_cookies}
-            new_to_test = [c for c in new_cookies if c.get('id') not in existing_ids]
-            
-            if new_to_test:
-                print(f"🆕 Found {len(new_to_test)} new cookies - testing...")
-                newly_valid = test_and_filter_cookies(new_to_test, brave_path)
-                valid_cookies.extend(newly_valid)
-                num_cookies = len(valid_cookies)
-                print(f"✅ Total valid cookies: {num_cookies}")
-            
-            cookie_file_mtime = os.path.getmtime(config['COOKIE_DB_PATH'])
-        
-        # Get cookie using round-robin (cycles through all cookies)
-        cookie_index = (idx - 1) % num_cookies
-        cookie_data = valid_cookies[cookie_index]
-        
-        cookie_name = cookie_data.get('account_name', 'Unknown')
-        print(f"📝 Queued [{idx}/{len(unseen_videos)}]: {video['title'][:50]}...")
-        print(f"   🍪 Cookie: {cookie_name} [{cookie_index + 1}/{num_cookies}]")
-        
-        # Create task with retry logic
-        task = asyncio.create_task(
-            play_video_task_with_retry(video, cookie_data, config.data, semaphore, 
-                                       persistence, cookie_mgr, valid_cookies, brave_path)
-        )
-        tasks.append(task)
+    # Add videos to queue (with duplication if needed)
+    if duplicate_videos and video_count == 1:
+        # Add same video multiple times for parallel processing
+        for i in range(active_workers):
+            await video_queue.put(unseen_videos[0])
+        print(f"\n✅ Added 1 video {active_workers} times for parallel processing")
+    else:
+        # Add each video once
+        for video in unseen_videos:
+            await video_queue.put(video)
+        print(f"\n✅ {len(unseen_videos)} videos added to queue")
     
-    print(f"\n✅ {len(tasks)} videos queued")
-    print(f"⚡ Starting {max_windows} concurrent playbacks...")
+    print(f"⚡ Starting {active_workers} concurrent workers...")
     print("=" * 60)
     
-    # Wait for all tasks to complete
-    print(f"\n⏳ Waiting for {len(tasks)} videos to complete...")
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    # Worker function
+    async def video_worker(worker_id: int, queue: asyncio.Queue, shutdown_event: asyncio.Event):
+        """Worker that processes videos from queue"""
+        videos_processed = 0
+        
+        while not shutdown_event.is_set():
+            try:
+                # Get video from queue with timeout
+                video = await asyncio.wait_for(queue.get(), timeout=1.0)
+                
+                # Get cookie using smart rotation (health-based selection)
+                cookie_data = cookie_rotator.get_next_cookie()
+                
+                if not cookie_data:
+                    print(f"❌ Worker {worker_id}: No healthy cookies available!")
+                    queue.task_done()
+                    continue
+                
+                cookie_name = cookie_data.get('account_name', 'Unknown')
+                cookie_id = cookie_data.get('id', 'unknown')
+                remaining = queue.qsize()
+                print(f"\n🎬 Worker {worker_id} starting video: {video['title'][:50]}...")
+                print(f"   🍪 Using cookie: {cookie_name} (health-based)")
+                print(f"   📊 Remaining: {remaining} videos")
+                
+                # Mark as in-progress for resume capability
+                persistence.mark_in_progress(
+                    video['video_id'],
+                    video.get('title', ''),
+                    cookie_id
+                )
+                
+                # Get video duration for metrics
+                video_duration = video.get('duration', 0)
+                
+                # Process video with retry
+                success = await play_video_task_with_retry(
+                    video, cookie_data, config.data, asyncio.Semaphore(1),
+                    persistence, cookie_mgr, valid_cookies, brave_path
+                )
+                
+                # Remove from in-progress (completed or failed)
+                persistence.remove_from_progress(video['video_id'])
+                
+                videos_processed += 1
+                queue.task_done()
+                
+                # Record metrics AND cookie health
+                if success:
+                    metrics.record_success(video['video_id'], cookie_id, video_duration)
+                    cookie_rotator.record_success(cookie_data, watch_time=video_duration)
+                    print(f"✅ Worker {worker_id} completed video #{videos_processed}")
+                else:
+                    metrics.record_failure(video['video_id'], cookie_id, "Playback failed")
+                    cookie_rotator.record_failure(cookie_data, error="Playback failed")
+                    print(f"❌ Worker {worker_id} failed video #{videos_processed}")
+                
+                # Show quick status every 5 videos
+                if videos_processed % 5 == 0:
+                    metrics.quick_status()
+                
+            except asyncio.TimeoutError:
+                # No video available, check shutdown
+                continue
+            except asyncio.CancelledError:
+                print(f"⚠️ Worker {worker_id} cancelled")
+                break
+            except Exception as e:
+                print(f"❌ Worker {worker_id} error: {e}")
+                continue
+        
+        print(f"🛑 Worker {worker_id} shutting down (processed {videos_processed} videos)")
+    
+    # Shutdown event for graceful termination
+    shutdown_event = asyncio.Event()
+    
+    # Create workers with dynamic count
+    workers = [
+        asyncio.create_task(video_worker(i+1, video_queue, shutdown_event))
+        for i in range(active_workers)  # Use dynamic worker count
+    ]
+    
+    # Background task to monitor for new videos
+    async def monitor_new_videos():
+        """Monitor channel for new videos and add them to queue with priority"""
+        last_check = datetime.now()
+        check_interval = config.get('NEW_VIDEO_CHECK_INTERVAL', 300)  # 5 minutes default
+        
+        while not shutdown_event.is_set():
+            try:
+                await asyncio.sleep(check_interval)
+                
+                if shutdown_event.is_set():
+                    break
+                
+                print(f"\n🔍 Checking for new videos...")
+                current_videos = await fetch_channel_videos(channel_url, config.data, max_videos=100)
+                
+                if not current_videos:
+                    continue
+                
+                # Find new videos (not in database)
+                new_videos = persistence.get_unseen_videos(current_videos)
+                
+                if new_videos:
+                    print(f"🆕 Found {len(new_videos)} new video(s)!")
+                    # Add new videos to front of queue (priority)
+                    for video in reversed(new_videos):
+                        # Put at front by getting all items, adding new one first, then re-adding
+                        print(f"   ➕ Adding: {video['title'][:50]}...")
+                    
+                    # Add to queue
+                    for video in new_videos:
+                        await video_queue.put(video)
+                    
+                    print(f"✅ {len(new_videos)} new video(s) added to queue with priority")
+                else:
+                    print(f"✓ No new videos found")
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"⚠️ Error checking for new videos: {e}")
+    
+    # Start monitoring task
+    monitor_task = asyncio.create_task(monitor_new_videos())
+    
+    # Background task to handle replay when queue is empty
+    async def replay_manager():
+        """Add watched videos back to queue for replay when all videos are done"""
+        replay_count = 0
+        
+        while not shutdown_event.is_set():
+            try:
+                await asyncio.sleep(10)  # Check every 10 seconds
+                
+                if shutdown_event.is_set():
+                    break
+                
+                # Check if queue is empty
+                if video_queue.empty():
+                    # Check if there are new videos first
+                    current_videos = await fetch_channel_videos(channel_url, config.data, max_videos=100)
+                    new_videos = persistence.get_unseen_videos(current_videos) if current_videos else []
+                    
+                    if new_videos:
+                        # New videos found, they will be added by monitor_new_videos
+                        print(f"\n🆕 New videos detected, skipping replay...")
+                        continue
+                    
+                    # No new videos, start replay
+                    replay_count += 1
+                    print(f"\n🔄 Queue empty! Starting replay cycle #{replay_count}...")
+                    print(f"   Clearing database and re-adding all videos...")
+                    
+                    # Clear seen videos to allow replay
+                    persistence.clear_all()
+                    
+                    # Re-fetch all videos
+                    all_videos_replay = await fetch_channel_videos(channel_url, config.data, max_videos=100)
+                    
+                    if all_videos_replay:
+                        # Add all videos back to queue
+                        for video in all_videos_replay:
+                            await video_queue.put(video)
+                        
+                        print(f"✅ Added {len(all_videos_replay)} videos for replay cycle #{replay_count}")
+                    else:
+                        print(f"⚠️ No videos found for replay")
+                    
+                    # Wait a bit before next check
+                    await asyncio.sleep(30)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"⚠️ Error in replay manager: {e}")
+    
+    # Start replay manager
+    replay_task = asyncio.create_task(replay_manager())
+    
+    # Wait for all videos to be processed
+    print(f"\n⏳ Processing videos with {active_workers} workers...")
+    print(f"🔄 Continuous mode: Will replay when done + monitor for new videos")
+    
+    try:
+        # Keep running until user stops (Ctrl+C)
+        await asyncio.gather(monitor_task, replay_task, return_exceptions=True)
+    except KeyboardInterrupt:
+        print("\n⚠️ Interrupted by user - shutting down gracefully...")
+        shutdown_event.set()
+    
+    # Cancel background tasks
+    shutdown_event.set()
+    monitor_task.cancel()
+    replay_task.cancel()
+    
+    # Cancel workers
+    for worker in workers:
+        worker.cancel()
+    
+    # Wait for all tasks to finish
+    await asyncio.gather(*workers, monitor_task, replay_task, return_exceptions=True)
+    
+    # Stop cookie watcher
+    watcher.stop()
     
     # Summary
-    successful = sum(1 for r in results if r is True)
-    failed = len(results) - successful
+    successful = metrics.videos_watched
+    failed = metrics.videos_failed
+    total = successful + failed
     
     print("\n" + "=" * 60)
-    print("📊 PLAYBACK SUMMARY")
+    print("🏁 PLAYBACK COMPLETE")
     print("=" * 60)
     print(f"✅ Successful: {successful}")
     print(f"❌ Failed: {failed}")
-    print(f"📈 Success rate: {successful/len(results)*100:.1f}%")
+    if total > 0:
+        print(f"📈 Success rate: {successful/total*100:.1f}%")
     print(f"⏱️  Completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
+    
+    # Show comprehensive metrics report
+    metrics.report()
+    
+    # Show cookie health report
+    print(cookie_rotator.get_health_report())
+    healthy_count = cookie_rotator.get_healthy_count()
+    print(f"\n🍪 Healthy cookies remaining: {healthy_count}/{len(valid_cookies)}")
     
     # Save final state
     cookie_mgr.persist()
