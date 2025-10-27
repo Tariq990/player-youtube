@@ -47,6 +47,6 @@ pip install -r requirements.txt
 # ========================================
 # الآن:
 # 1. ارفع ملف cookies.json: شغّل 2_upload_cookies.bat من جهازك (Windows)
-# 2. بعد رفع الكوكيز، شغّل التطبيق:
-#    xvfb-run -a python3.13 src/app.py
+# 2. بعد رفع الكوكيز، إعداد الخدمة الدائمة (24/7):
+#    انسخ الأوامر من: setup_systemd_service.txt
 # ========================================

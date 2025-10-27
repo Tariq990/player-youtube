@@ -1,17 +1,13 @@
 # ========================================
 # إعداد Systemd Service للتشغيل 24/7
-# انسخ والصق في نافذة SSH على السيرفر
+# التطبيق سيعمل في الخلفية بشكل دائم
+# لا يحتاج SSH مفتوح، يعمل مثل Windows Service
 # ========================================
 
 # إنشاء ملف الخدمة
-sudo nano /etc/systemd/system/youtube-player.service
-
-# ========================================
-# الصق هذا المحتوى في الملف:
-# ========================================
-
+sudo tee /etc/systemd/system/youtube-player.service > /dev/null <<EOF
 [Unit]
-Description=YouTube Player Auto-View Service
+Description=YouTube Player Auto-View Service (24/7)
 After=network.target
 
 [Service]
@@ -28,23 +24,21 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
+EOF
 
-# ========================================
-# احفظ الملف:
-# اضغط: Ctrl+O ثم Enter
-# اخرج: Ctrl+X
-# ========================================
-
-# تفعيل الخدمة
+# تفعيل وتشغيل الخدمة
 sudo systemctl daemon-reload
 sudo systemctl enable youtube-player
 sudo systemctl start youtube-player
 
-# التحقق من الحالة
-sudo systemctl status youtube-player
+echo ""
+echo "========================================="
+echo "  ✅ الخدمة تعمل الآن 24/7!"
+echo "========================================="
+echo ""
 
-# مشاهدة السجلات المباشرة
-sudo journalctl -u youtube-player -f
+# عرض حالة الخدمة
+sudo systemctl status youtube-player
 
 # ========================================
 # أوامر إدارة الخدمة:
