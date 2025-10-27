@@ -189,8 +189,7 @@ async def play_video_task_with_retry(video: dict, cookie_data: dict, config: dic
         # Use the new retry logic with exponential backoff
         result = await retry_async(
             attempt_play,
-            retry_config,
-            operation_name=f"play_video_{video.get('video_id', 'unknown')}"
+            config=retry_config
         )
         return result
     except Exception as e:

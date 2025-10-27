@@ -6,8 +6,11 @@ Monitors cookies.json for changes and reloads automatically.
 import asyncio
 import logging
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 from watchdog.observers import Observer
+
+if TYPE_CHECKING:
+    from watchdog.observers import Observer as ObserverType
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
 
 logger = logging.getLogger(__name__)
@@ -50,7 +53,8 @@ class CookieFileHandler(FileSystemEventHandler):
             return
             
         # Debounce multiple rapid modifications
-        current_time = asyncio.get_event_loop().time()
+        import time
+        current_time = time.time()
         if current_time - self._last_reload < self.debounce_seconds:
             logger.debug(f"Debouncing cookie reload (last reload {current_time - self._last_reload:.1f}s ago)")
             return
@@ -59,14 +63,12 @@ class CookieFileHandler(FileSystemEventHandler):
         
         # Schedule reload in asyncio event loop
         try:
-            loop = asyncio.get_event_loop()
-            if self._reload_task and not self._reload_task.done():
-                self._reload_task.cancel()
-            self._reload_task = loop.create_task(self._async_reload())
-        except RuntimeError:
-            # No event loop running, call directly
-            logger.warning("No event loop running, calling reload directly")
+            # Call reload directly (synchronous)
+            logger.info(f"Cookie file modified, reloading: {self.cookie_path.name}")
             self.reload_callback()
+            logger.info("Cookies reloaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to reload cookies: {e}", exc_info=True)
     
     async def _async_reload(self) -> None:
         """Async wrapper for reload callback."""
@@ -99,8 +101,8 @@ class CookieWatcher:
         self.reload_callback = reload_callback
         self.debounce_seconds = debounce_seconds
         
-        self._observer: Observer | None = None
-        self._handler: CookieFileHandler | None = None
+        self._observer = None  # type: Optional[Observer]
+        self._handler = None  # type: Optional[CookieFileHandler]
         
     def start(self) -> None:
         """Start watching cookie file."""
